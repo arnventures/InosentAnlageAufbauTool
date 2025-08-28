@@ -1,0 +1,492 @@
+﻿<Window x:Class="InosentAnlageAufbauTool.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:InosentAnlageAufbauTool"
+        xmlns:conv="clr-namespace:InosentAnlageAufbauTool.Converters"
+
+        Title="Inosent Anlage Aufbau Tool"
+        WindowState="Maximized"
+        FontSize="22"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True">
+
+    <!-- =================== RESOURCES / STYLES =================== -->
+    <Window.Resources>
+        <!-- Converters (liegen im Namespace InosentAnlageAufbauTool.Converters) -->
+        <conv:StringNotEmptyConverter x:Key="StringNotEmpty"/>
+        <conv:BoolToBrushConverter   x:Key="BoolToBrush" TrueBrush="#27AE60" FalseBrush="#BDBDBD"/>
+        <conv:MultiAndConverter      x:Key="MultiAnd"/>
+        <conv:WidthToBoolConverter   x:Key="WidthToBool" Threshold="1400"/>
+        <conv:MultiOrConverter       x:Key="MultiOr"/>
+
+        <!-- Design Tokens -->
+        <SolidColorBrush x:Key="ColorPrimary"       Color="#1976D2"/>
+        <SolidColorBrush x:Key="ColorSuccess"       Color="#2E7D32"/>
+        <SolidColorBrush x:Key="ColorDanger"        Color="#C62828"/>
+        <SolidColorBrush x:Key="ColorWarn"          Color="#F9A825"/>
+        <SolidColorBrush x:Key="ColorSurface"       Color="#F7F8FA"/>
+        <SolidColorBrush x:Key="ColorSurfaceStrong" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="ColorHeader"        Color="#EEF0F2"/>
+        <SolidColorBrush x:Key="ColorBorder"        Color="#E0E3E7"/>
+        <SolidColorBrush x:Key="ColorRowAlt"        Color="#FAFBFC"/>
+
+        <!-- Base controls -->
+        <Style x:Key="BaseControl" TargetType="Control">
+            <Setter Property="Height" Value="48"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Buttons -->
+        <Style x:Key="Btn" TargetType="Button" BasedOn="{StaticResource BaseControl}">
+            <Setter Property="MinWidth" Value="140"/>
+            <Setter Property="Padding" Value="16,6"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="0,0,12,12"/>
+        </Style>
+        <Style x:Key="BtnPrimary" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Background" Value="{StaticResource ColorPrimary}"/>
+        </Style>
+        <Style x:Key="BtnSuccess" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Background" Value="{StaticResource ColorSuccess}"/>
+        </Style>
+        <Style x:Key="BtnDanger" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Background" Value="{StaticResource ColorDanger}"/>
+        </Style>
+        <Style x:Key="BtnWarn" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Foreground" Value="Black"/>
+            <Setter Property="Background" Value="{StaticResource ColorWarn}"/>
+        </Style>
+        <Style x:Key="BtnGhost" TargetType="Button" BasedOn="{StaticResource BaseControl}">
+            <Setter Property="MinWidth" Value="140"/>
+            <Setter Property="Padding" Value="16,6"/>
+            <Setter Property="Foreground" Value="Black"/>
+            <Setter Property="Background" Value="{StaticResource ColorSurfaceStrong}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ColorBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="0,0,12,12"/>
+        </Style>
+
+        <!-- Inputs -->
+        <Style x:Key="BaseTextBox" TargetType="TextBox" BasedOn="{StaticResource BaseControl}">
+            <Setter Property="MinWidth" Value="220"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,12,12"/>
+        </Style>
+        <Style x:Key="BaseCombo" TargetType="ComboBox" BasedOn="{StaticResource BaseControl}">
+            <Setter Property="MinWidth" Value="220"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,0,12,12"/>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Step cards -->
+        <Style x:Key="StepCard" TargetType="Border">
+            <Setter Property="CornerRadius" Value="18"/>
+            <Setter Property="Padding" Value="16"/>
+            <Setter Property="Margin" Value="0,0,12,12"/>
+            <Setter Property="Background" Value="{StaticResource ColorSurfaceStrong}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ColorBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Effect">
+                <Setter.Value>
+                    <DropShadowEffect BlurRadius="12" ShadowDepth="1" Opacity="0.15"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- COM status LED -->
+        <Style x:Key="ComDot" TargetType="Ellipse">
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="18"/>
+            <Setter Property="Fill" Value="{Binding IsComConnected, Converter={StaticResource BoolToBrush}}"/>
+            <Setter Property="Margin" Value="8,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Modern DataGrid -->
+        <Style TargetType="DataGrid">
+            <Setter Property="AutoGenerateColumns" Value="False"/>
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="GridLinesVisibility" Value="None"/>
+            <Setter Property="RowHeight" Value="48"/>
+            <Setter Property="CanUserAddRows" Value="False"/>
+            <Setter Property="CanUserDeleteRows" Value="False"/>
+            <Setter Property="CanUserReorderColumns" Value="True"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="Margin" Value="16"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ColorBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="AlternatingRowBackground" Value="{StaticResource ColorRowAlt}"/>
+            <Setter Property="Background" Value="{StaticResource ColorSurfaceStrong}"/>
+        </Style>
+
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{StaticResource ColorHeader}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ColorBorder}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style TargetType="DataGridRow">
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridRow">
+                        <Border x:Name="RowBorder"
+                                CornerRadius="10"
+                                Margin="0,4"
+                                Background="{TemplateBinding Background}">
+                            <DataGridCellsPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="RowBorder" Property="Background" Value="#F2F6FF"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="RowBorder" Property="Background" Value="#E3F2FD"/>
+                                <Setter Property="Foreground" Value="#0D47A1"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="DataGridCell">
+            <Setter Property="BorderBrush" Value="{StaticResource ColorBorder}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="Padding" Value="10,6"/>
+        </Style>
+
+        <!-- BIG checkbox for selection columns -->
+        <Style x:Key="BigCheckBox" TargetType="CheckBox">
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="LayoutTransform">
+                <Setter.Value>
+                    <ScaleTransform ScaleX="1.4" ScaleY="1.4"/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="DGCheckElementStyle" TargetType="{x:Type CheckBox}" BasedOn="{StaticResource BigCheckBox}"/>
+        <Style x:Key="DGCheckEditingStyle" TargetType="{x:Type CheckBox}" BasedOn="{StaticResource BigCheckBox}"/>
+    </Window.Resources>
+
+    <!-- =================== LAYOUT =================== -->
+    <DockPanel x:Name="Root" LastChildFill="True" Background="{StaticResource ColorSurface}">
+
+        <!-- Steps oben -->
+        <ScrollViewer DockPanel.Dock="Top" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled">
+            <WrapPanel Margin="16" HorizontalAlignment="Center">
+
+                <!-- Step 1: Anlage-Nr -->
+                <Border Style="{StaticResource StepCard}">
+                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="1. Anlage-Nr." Margin="0,0,16,0" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                        <TextBox  Grid.Column="1" Style="{StaticResource BaseTextBox}" Width="260"
+                                  ToolTip="Pflichtfeld"
+                                  Text="{Binding ProjectNumber, UpdateSourceTrigger=PropertyChanged}" Margin="0,6,12,6"/>
+                        <Button   Grid.Column="2" Style="{StaticResource BtnPrimary}"
+                                  Content="Laden / OK"
+                                  Command="{Binding LoadExcelCommand}"
+                                  IsEnabled="{Binding ProjectNumber, Converter={StaticResource StringNotEmpty}}" Margin="0,6,12,6"/>
+                    </Grid>
+                </Border>
+
+                <!-- Step 2: COM -->
+                <Border Style="{StaticResource StepCard}">
+                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0" Text="2. COM-Port" Margin="0,0,16,0"
+                   VerticalAlignment="Center" FontWeight="SemiBold"/>
+
+                        <ComboBox Grid.Column="1" Style="{StaticResource BaseCombo}" Width="220"
+                  ItemsSource="{Binding AvailablePorts}"
+                  SelectedItem="{Binding SelectedPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                  VerticalAlignment="Center" Margin="0,0,12,0"/>
+
+                        <Button   Grid.Column="2" Style="{StaticResource BtnGhost}"
+                  Content="Refresh" Command="{Binding RefreshPortsCommand}"
+                  VerticalAlignment="Center" Margin="0,0,12,0"/>
+
+                        <!-- NEW: explicit connect -->
+                        <Button Grid.Column="3" Style="{StaticResource BtnPrimary}"
+                            Content="Verbinden" Command="{Binding ConnectToPortCommand}"
+                            VerticalAlignment="Center" Margin="10,0,2,0"
+                            IsEnabled="{Binding SelectedPort, Converter={StaticResource StringNotEmpty}}"/>
+
+                        <Ellipse  Grid.Column="4" Style="{StaticResource ComDot}" VerticalAlignment="Center"/>
+
+                        <TextBlock Grid.Column="5"
+                   Text="{Binding SelectedPort, StringFormat=' {0}'}"
+                   VerticalAlignment="Center"
+                   HorizontalAlignment="Center"
+                   Margin="8,0,0,0"/>
+                    </Grid>
+                </Border>
+
+
+                <!-- Step 3: Start -->
+                <Border Style="{StaticResource StepCard}">
+                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0" Text="3. Start" Margin="0,0,16,0"
+                   VerticalAlignment="Center" FontWeight="SemiBold"/>
+
+                        <Button   Grid.Column="1" Style="{StaticResource BtnSuccess}"
+                  Content="▶ Start" Command="{Binding StartCommand}"
+                  VerticalAlignment="Center" Margin="0,0,12,0">
+                            <Button.IsEnabled>
+                                <MultiBinding Converter="{StaticResource MultiAnd}">
+                                    <Binding Path="ProjectNumber" Converter="{StaticResource StringNotEmpty}"/>
+                                    <Binding Path="SelectedPort"   Converter="{StaticResource StringNotEmpty}"/>
+                                    <!-- Optionally require an open connection:
+                    <Binding Path="IsComConnected"/>
+                    -->
+                                </MultiBinding>
+                            </Button.IsEnabled>
+                        </Button>
+
+                        <Button   Grid.Column="2" Style="{StaticResource BtnDanger}"
+                  Content="■ Stop" Command="{Binding StopCommand}"
+                  Margin="12,0,0,0" VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
+
+
+                <!-- Actions: Print / Config / Help -->
+                <Border Style="{StaticResource StepCard}">
+                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" Style="{StaticResource BtnWarn}"   Content="LED-Labels drucken"    Command="{Binding PrintLedLabelsCommand}" Margin="0,6,12,6"/>
+                        <Button Grid.Column="1" Style="{StaticResource BtnWarn}"   Content="Sensor-Labels drucken" Command="{Binding PrintSensorLabelsCommand}" RenderTransformOrigin="0.49,0.896" Margin="2,6,10,6"/>
+                        <Button Grid.Column="2" Style="{StaticResource BtnGhost}"  Content="⚙ Config"              Command="{Binding OpenConfigCommand}" Margin="2,6,10,6"/>
+                        <Button Grid.Column="3" Style="{StaticResource BtnGhost}"  Content="❓ Hilfe"               Command="{Binding ShowHelpCommand}" Margin="2,6,10,6"/>
+                    </Grid>
+                </Border>
+
+                <!-- Ansicht: Split <-> Tabs -->
+                <Border Style="{StaticResource StepCard}">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="Ansicht:" Margin="0,0,12,0" VerticalAlignment="Center" FontWeight="SemiBold"/>
+                        <!-- WICHTIG: genau eine Style-Zuweisung (nur Property-Element, kein Attribut im Start-Tag) -->
+                        <ToggleButton x:Name="ToggleViewButton" MinWidth="160" Height="44" Background="#FF4BC1F3">
+                            <ToggleButton.Style>
+                                <Style TargetType="ToggleButton">
+                                    <Setter Property="Content" Value="Split View"/>
+                                    <Style.Triggers>
+                                        <Trigger Property="IsChecked" Value="True">
+                                            <Setter Property="Content" Value="Tabs View"/>
+                                        </Trigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ToggleButton.Style>
+                        </ToggleButton>
+
+                    </StackPanel>
+                </Border>
+            </WrapPanel>
+        </ScrollViewer>
+
+        <!-- Statusbar -->
+        <StatusBar DockPanel.Dock="Bottom" Background="{StaticResource ColorSurfaceStrong}" Padding="8"
+                   BorderBrush="{StaticResource ColorBorder}" BorderThickness="1,1,1,0">
+            <StatusBarItem>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Status:" FontWeight="SemiBold" Margin="0,0,8,0"/>
+                    <TextBlock Text="{Binding StatusText}"/>
+                </StackPanel>
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- Main Content: Split vs Tabs -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="200"/>
+            </Grid.RowDefinitions>
+
+            <!-- SplitView -->
+            <Grid x:Name="SplitView" Grid.Row="0">
+                <Grid.Style>
+                    <Style TargetType="Grid">
+                        <!-- default: collapsed -->
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <!-- Show Split when: Toggle = Split (IsChecked == false) AND Width >= Threshold -->
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding ElementName=ToggleViewButton, Path=IsChecked}" Value="False"/>
+                                    <Condition Binding="{Binding ElementName=Root, Path=ActualWidth, Converter={StaticResource WidthToBool}}" Value="True"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Visible"/>
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Grid.Style>
+
+                <!-- (keep your column definitions and grids as-is) -->
+
+
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="380"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="*" MinWidth="380"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Sensors -->
+                <Border CornerRadius="12" Margin="16" BorderBrush="{StaticResource ColorBorder}" BorderThickness="1" Background="{StaticResource ColorSurfaceStrong}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="Sensoren" FontWeight="SemiBold" Padding="12,10" FontSize="24"/>
+                        <DataGrid ItemsSource="{Binding Sensors}">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Sel" Binding="{Binding IsSelected}" Width="80"
+                                                        ElementStyle="{StaticResource DGCheckElementStyle}"
+                                                        EditingElementStyle="{StaticResource DGCheckEditingStyle}"/>
+                                <DataGridTextColumn Header="Index"    Binding="{Binding Index}"    Width="80"/>
+                                <DataGridTextColumn Header="Model"    Binding="{Binding Model}"    Width="180"/>
+                                <DataGridTextColumn Header="Location" Binding="{Binding Location}" Width="*"/>
+                                <DataGridTextColumn Header="Address"  Binding="{Binding Address}"  Width="110"/>
+                                <DataGridTextColumn Header="Serial"   Binding="{Binding Serial}"   Width="180"/>
+                                <DataGridTextColumn Header="Status"   Binding="{Binding Status}"   Width="140"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
+                </Border>
+
+                <!-- Divider -->
+                <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                              Background="#E6E8EB" ShowsPreview="True"/>
+
+                <!-- Lights -->
+                <Border Grid.Column="2" CornerRadius="12" Margin="16" BorderBrush="{StaticResource ColorBorder}" BorderThickness="1" Background="{StaticResource ColorSurfaceStrong}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="Leuchten" FontWeight="SemiBold" Padding="12,10" FontSize="24"/>
+                        <DataGrid ItemsSource="{Binding Lights}">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Sel" Binding="{Binding IsSelected}" Width="80"
+                                                        ElementStyle="{StaticResource DGCheckElementStyle}"
+                                                        EditingElementStyle="{StaticResource DGCheckEditingStyle}"/>
+                                <DataGridTextColumn Header="Index"     Binding="{Binding Index}"     Width="80"/>
+                                <DataGridTextColumn Header="Model"     Binding="{Binding Model}"     Width="180"/>
+                                <DataGridTextColumn Header="Location"  Binding="{Binding Location}"  Width="*"/>
+                                <DataGridTextColumn Header="Address"   Binding="{Binding Address}"   Width="110"/>
+                                <DataGridTextColumn Header="TimeOut"   Binding="{Binding TimeOut}"   Width="140"/>
+                                <DataGridTextColumn Header="Status"    Binding="{Binding Status}"    Width="140"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
+                </Border>
+            </Grid>
+
+            <TabControl x:Name="TabsView" Grid.Row="0" Margin="8" FontSize="20">
+                <TabControl.Style>
+                    <Style TargetType="TabControl">
+                        <!-- default: visible -->
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Setter Property="SelectedIndex" Value="0"/>
+
+                        <Style.Triggers>
+                            <!-- Hide Tabs when: Toggle = Split (false) AND Width >= Threshold (Split will show) -->
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding ElementName=ToggleViewButton, Path=IsChecked}" Value="False"/>
+                                    <Condition Binding="{Binding ElementName=Root, Path=ActualWidth, Converter={StaticResource WidthToBool}}" Value="True"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </MultiDataTrigger>
+
+                            <!-- Auto jump to LEDs when sensors complete -->
+                            <DataTrigger Binding="{Binding AreSensorsComplete}" Value="True">
+                                <Setter Property="SelectedIndex" Value="1"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TabControl.Style>
+
+                <!-- (keep your TabItems as-is) -->
+
+
+                <TabItem Header="Sensoren">
+                    <Border CornerRadius="12" Margin="8" BorderBrush="{StaticResource ColorBorder}" BorderThickness="1" Background="{StaticResource ColorSurfaceStrong}">
+                        <DataGrid ItemsSource="{Binding Sensors}" Margin="0,8,0,8">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Sel" Binding="{Binding IsSelected}" Width="80"
+                                                        ElementStyle="{StaticResource DGCheckElementStyle}"
+                                                        EditingElementStyle="{StaticResource DGCheckEditingStyle}"/>
+                                <DataGridTextColumn Header="Index"    Binding="{Binding Index}"    Width="80"/>
+                                <DataGridTextColumn Header="Model"    Binding="{Binding Model}"    Width="180"/>
+                                <DataGridTextColumn Header="Location" Binding="{Binding Location}" Width="*"/>
+                                <DataGridTextColumn Header="Address"  Binding="{Binding Address}"  Width="110"/>
+                                <DataGridTextColumn Header="Serial"   Binding="{Binding Serial}"   Width="180"/>
+                                <DataGridTextColumn Header="Status"   Binding="{Binding Status}"   Width="140"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Border>
+                </TabItem>
+
+                <TabItem Header="Leuchten">
+                    <Border CornerRadius="12" Margin="8" BorderBrush="{StaticResource ColorBorder}" BorderThickness="1" Background="{StaticResource ColorSurfaceStrong}">
+                        <DataGrid ItemsSource="{Binding Lights}" Margin="0,8,0,8">
+                            <DataGrid.Columns>
+                                <DataGridCheckBoxColumn Header="Sel" Binding="{Binding IsSelected}" Width="80"
+                                                        ElementStyle="{StaticResource DGCheckElementStyle}"
+                                                        EditingElementStyle="{StaticResource DGCheckEditingStyle}"/>
+                                <DataGridTextColumn Header="Index"     Binding="{Binding Index}"     Width="80"/>
+                                <DataGridTextColumn Header="Model"     Binding="{Binding Model}"     Width="180"/>
+                                <DataGridTextColumn Header="Location"  Binding="{Binding Location}"  Width="*"/>
+                                <DataGridTextColumn Header="Address"   Binding="{Binding Address}"   Width="110"/>
+                                <DataGridTextColumn Header="TimeOut"   Binding="{Binding TimeOut}"   Width="140"/>
+                                <DataGridTextColumn Header="Status"    Binding="{Binding Status}"    Width="140"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Border>
+                </TabItem>
+            </TabControl>
+
+            <!-- Log -->
+            <Border Grid.Row="1" Margin="16" CornerRadius="12" BorderBrush="{StaticResource ColorBorder}" BorderThickness="1"
+                    Background="{StaticResource ColorSurfaceStrong}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Protokoll" FontWeight="SemiBold" Padding="12,8"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="12,0,12,12">
+                        <TextBlock Text="{Binding LogText, Mode=OneWay}" TextWrapping="Wrap"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

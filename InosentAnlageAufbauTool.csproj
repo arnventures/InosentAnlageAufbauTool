@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<UseWPF>true</UseWPF>
+		<ApplicationIcon>Resources\inosent.ico</ApplicationIcon>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+	<ItemGroup>
+		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
+		<PackageReference Include="EPPlus" Version="7.4.0" />
+		<PackageReference Include="NModbus" Version="3.0.81" />
+		<PackageReference Include="NModbus.Serial" Version="3.0.81" />
+		<PackageReference Include="System.IO.Ports" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
+	</ItemGroup>
+	<ItemGroup>
+		<Resource Include="Resources\inosent.ico" />
+		<Content Include="Resources\AutomaticLightDE.ezpx" CopyToOutputDirectory="PreserveNewest" />
+		<Content Include="Resources\AutomaticSensorDE.ezpx" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+</Project>
