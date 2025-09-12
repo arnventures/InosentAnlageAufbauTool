@@ -42,8 +42,8 @@ namespace InosentAnlageAufbauTool.Services
 
         public bool PrintLedLabels(string srcPath)
         {
-            // Prepare Excel export (unchanged logic – ensure data is present)
-            var dstPath = Path.Combine(Path.GetTempPath(), "PowerAutomateGodexLightDe.xlsx");
+            var baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources");
+            var dstPath = Path.Combine(baseDir, "GodexLightDe.xlsx");
             if (!_excelService.CopyLedData(srcPath, dstPath))
             {
                 _logger.Log("[Print] LED: Excel konnte nicht erstellt/kopiert werden.");
@@ -55,7 +55,8 @@ namespace InosentAnlageAufbauTool.Services
 
         public bool PrintSensorLabels(string srcPath)
         {
-            var dstPath = Path.Combine(Path.GetTempPath(), "PowerAutomateGodexSensorDe.xlsx");
+            var baseDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources");
+            var dstPath = Path.Combine(baseDir, "GodexSensorDe.xlsx");
             if (!_excelService.CopySensorData(srcPath, dstPath))
             {
                 _logger.Log("[Print] SENSOR: Excel konnte nicht erstellt/kopiert werden.");
@@ -78,19 +79,14 @@ namespace InosentAnlageAufbauTool.Services
                 if (!File.Exists(template))
                     throw new FileNotFoundException($"{tag}: Template nicht gefunden.", template);
 
-                var args = string.Join(" ", new[]
-                {
-                    "-f", Quote(template),
-                    "-c", CopiesEach.ToString(),
-                    "-i", Quote(ip)
-                });
+                var args = $"/P \"{template}\" /N {CopiesEach} /O \"tcp://{ip}\"";
 
                 var psi = new ProcessStartInfo
                 {
                     FileName = GoLabelExePath,
                     Arguments = args,
-                    UseShellExecute = true,      // allow GoLabel UI if needed
-                    CreateNoWindow = false
+                    UseShellExecute = false,
+                    CreateNoWindow = true
                 };
 
                 using var p = Process.Start(psi) ?? throw new Exception($"{tag}: Prozessstart fehlgeschlagen.");
@@ -107,6 +103,5 @@ namespace InosentAnlageAufbauTool.Services
             }
         }
 
-        private static string Quote(string s) => $"\"{s}\"";
     }
 }
