@@ -780,7 +780,7 @@
     <DateFormat>y2-me-dd</DateFormat>
     <TimeFormat>h:m:s</TimeFormat>
     <DataBaseFormat>ExcelXlsx</DataBaseFormat>
-    <DataBaseFilePath>C:\PowerAutomateArnDoNotDelete\PowerAutomateGodexLightDe.xlsx</DataBaseFilePath>
+    <DataBaseFilePath>$(CurrentPath)\GodexLightDe.xlsx</DataBaseFilePath>
     <DataBaseSelection>SELECT  * from `ImportGodex$` ;</DataBaseSelection>
     <UserID />
     <Password>zhsTbm6nT9o+RQurpwH5Hw==</Password>
