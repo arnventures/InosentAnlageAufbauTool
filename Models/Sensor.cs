@@ -6,6 +6,7 @@ namespace InosentAnlageAufbauTool.Models
     {
         [ObservableProperty] private bool isSelected = true;
         [ObservableProperty] private int index;
+        [ObservableProperty] private int excelRow;
         [ObservableProperty] private string model = string.Empty;
         [ObservableProperty] private string location = string.Empty;
         [ObservableProperty] private int address;

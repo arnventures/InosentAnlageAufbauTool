@@ -6,6 +6,7 @@ namespace InosentAnlageAufbauTool.Models
     {
         public int? Number { get; set; }
         public string ExcelPath { get; set; } = string.Empty;
+        public string WorkingCopyPath { get; set; } = string.Empty;
 
         public string FindExcelPath(int nr)
         {

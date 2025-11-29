@@ -22,6 +22,7 @@
         <!-- Design Tokens -->
         <SolidColorBrush x:Key="ColorPrimary"       Color="#1976D2"/>
         <SolidColorBrush x:Key="ColorSuccess"       Color="#2E7D32"/>
+        <SolidColorBrush x:Key="ColorSuccessRow"   Color="#E5F6E8"/>
         <SolidColorBrush x:Key="ColorDanger"        Color="#C62828"/>
         <SolidColorBrush x:Key="ColorWarn"          Color="#F9A825"/>
         <SolidColorBrush x:Key="ColorSurface"       Color="#F7F8FA"/>
@@ -149,6 +150,10 @@
                             <DataGridCellsPresenter/>
                         </Border>
                         <ControlTemplate.Triggers>
+                            <DataTrigger Binding="{Binding Status}" Value="OK">
+                                <Setter TargetName="RowBorder" Property="Background" Value="{StaticResource ColorSuccessRow}"/>
+                                <Setter Property="Foreground" Value="#1B5E20"/>
+                            </DataTrigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="RowBorder" Property="Background" Value="#F2F6FF"/>
                             </Trigger>

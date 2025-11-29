@@ -7,6 +7,13 @@
 		<Nullable>enable</Nullable>
 	</PropertyGroup>
 	<ItemGroup>
+	  <Compile Remove="Converters\BoolToBrushConverter.cs" />
+	  <Compile Remove="Converters\MultiAndConverter.cs" />
+	  <Compile Remove="Converters\MultiOrConverter.cs" />
+	  <Compile Remove="Converters\StringNotEmptyConverter.cs" />
+	  <Compile Remove="Converters\WidthToBoolConverter.cs" />
+	</ItemGroup>
+	<ItemGroup>
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
 		<PackageReference Include="EPPlus" Version="7.4.0" />
 		<PackageReference Include="NModbus" Version="3.0.81" />
@@ -18,5 +25,8 @@
 		<Resource Include="Resources\inosent.ico" />
 		<Content Include="Resources\AutomaticLightDE.ezpx" CopyToOutputDirectory="PreserveNewest" />
 		<Content Include="Resources\AutomaticSensorDE.ezpx" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Converters\" />
 	</ItemGroup>
 </Project>

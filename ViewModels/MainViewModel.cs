@@ -12,7 +12,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
-
 namespace InosentAnlageAufbauTool.ViewModels
 {
     public partial class MainViewModel : ObservableObject
@@ -24,24 +23,28 @@ namespace InosentAnlageAufbauTool.ViewModels
         private readonly ILogger _logger;
         private readonly ISensorWorkflow _sensorWorkflow;
         private readonly ILedWorkflow _ledWorkflow;
-
         private readonly ProjectContext _projectContext = new();
-
         private CancellationTokenSource? _cts;
         private readonly AutoResetEvent _skipEvent = new(false);
-
         [ObservableProperty] private ObservableCollection<Sensor> sensors = new();
+        [ObservableProperty] private ObservableCollection<Led> lights = new();
         [ObservableProperty] private string projectNumber = string.Empty;
         [ObservableProperty] private string selectedPort = string.Empty;
         [ObservableProperty] private ObservableCollection<string> availablePorts = new();
         [ObservableProperty] private string statusText = "Bereit";
         [ObservableProperty] private string statusColor = "Yellow";
-        [ObservableProperty] private string currentProjectLabel = "Current Anlage: –";
+        [ObservableProperty] private string currentProjectLabel = "Current Anlage: -";
         [ObservableProperty] private string logText = string.Empty;
         [ObservableProperty] private bool isRunning;
-
-        public bool AreSensorsComplete => Sensors.Count > 0 && Sensors.All(s => s.Status is "OK" or "Skipped");
-
+        [ObservableProperty] private bool isComConnected;
+        public bool AreSensorsComplete
+        {
+            get
+            {
+                var selected = Sensors.Where(s => s.IsSelected).ToList();
+                return selected.Count > 0 && selected.All(s => s.Status is "OK" or "Skipped" or "Fail");
+            }
+        }
         public MainViewModel(
             ExcelService excelService,
             SerialService serialService,
@@ -54,13 +57,10 @@ namespace InosentAnlageAufbauTool.ViewModels
             _labelPrinterService = labelPrinterService;
             _configService = configService;
             _logger = logger;
-
-            _sensorWorkflow = new SensorWorkflow(_serialService, _excelService, _logger);
-            _ledWorkflow = new LedWorkflow(_serialService, _excelService, _logger);
-
+            _sensorWorkflow = new SensorWorkflow(_serialService, _logger);
+            _ledWorkflow = new LedWorkflow(_serialService, _logger);
             RefreshPortsCommand.Execute(null);
         }
-
         // Auto-connect whenever SelectedPort changes in the UI
         partial void OnSelectedPortChanged(string value)
         {
@@ -70,7 +70,6 @@ namespace InosentAnlageAufbauTool.ViewModels
                 ConnectToPort();
             }
         }
-
         // ---------- Logging ----------
         private void Log(string msg)
         {
@@ -80,7 +79,6 @@ namespace InosentAnlageAufbauTool.ViewModels
             });
             _logger.Log(msg);
         }
-
         // ---------- Ports ----------
         [RelayCommand]
         private void RefreshPorts()
@@ -96,7 +94,6 @@ namespace InosentAnlageAufbauTool.ViewModels
                 StatusColor = "LightGreen";
                 Log($"Verfügbare Ports: {string.Join(", ", AvailablePorts)}");
 
-                // Auto-connect to the first available port if not already connected
                 if (!_serialService.IsConnected && !string.IsNullOrWhiteSpace(SelectedPort))
                 {
                     ConnectToPort();
@@ -108,6 +105,8 @@ namespace InosentAnlageAufbauTool.ViewModels
                 StatusColor = "Red";
                 Log($"Verfügbare Ports: Keine");
             }
+
+            IsComConnected = _serialService.IsConnected;
         }
 
         [RelayCommand]
@@ -124,8 +123,8 @@ namespace InosentAnlageAufbauTool.ViewModels
             StatusText = connected ? $"{SelectedPort}: connected" : $"{SelectedPort}: Verbindung fehlgeschlagen";
             StatusColor = connected ? "LightGreen" : "Red";
             Log($"Verbindung zu {SelectedPort}: {(connected ? "OK" : $"fehlgeschlagen ({_serialService.LastError})")})");
+            IsComConnected = connected;
         }
-
         // ---------- Excel ----------
         [RelayCommand]
         private void LoadExcel()
@@ -143,26 +142,14 @@ namespace InosentAnlageAufbauTool.ViewModels
                 if (ofd.ShowDialog() == true) _projectContext.ExcelPath = ofd.FileName;
                 else return;
             }
-
             try
             {
-                var sensorData = _excelService.LoadSensorData(_projectContext.ExcelPath);
-                Sensors.Clear();
-                for (int i = 0; i < sensorData.Count; i++)
-                {
-                    var data = sensorData[i];
-                    Sensors.Add(new Sensor
-                    {
-                        Index = i + 1,
-                        Model = data.Model,
-                        Location = data.Location ?? string.Empty,
-                        Address = data.Address,
-                        Buzzer = data.DisableBuzzer ? "Disable" : "Enable",
-                        Status = "Pending"
-                    });
-                }
+                _projectContext.WorkingCopyPath = _excelService.CreateWorkingCopy(_projectContext.ExcelPath);
+                LoadFromWorkingCopy();
                 CurrentProjectLabel = $"Current Anlage: {nr}";
-                Log($"Excel geladen – {Sensors.Count} Sensoren.");
+                StatusText = "Excel geladen";
+                StatusColor = "LightGreen";
+                Log($"Excel geladen - {Sensors.Count} Sensoren, {Lights.Count} Leuchten (Arbeitskopie: {_projectContext.WorkingCopyPath}).");
             }
             catch (Exception ex)
             {
@@ -170,7 +157,46 @@ namespace InosentAnlageAufbauTool.ViewModels
                 Log($"[ERROR] Excel-Load: {ex.Message}");
             }
         }
-
+        private void LoadFromWorkingCopy()
+        {
+            if (string.IsNullOrWhiteSpace(_projectContext.WorkingCopyPath))
+                throw new InvalidOperationException("Keine Arbeitskopie gesetzt.");
+            var sensorData = _excelService.LoadSensorData(_projectContext.WorkingCopyPath);
+            Sensors.Clear();
+            foreach (var data in sensorData)
+            {
+                Sensors.Add(new Sensor
+                {
+                    Index = data.RowIndex,
+                    ExcelRow = data.RowIndex,
+                    Model = data.Model,
+                    Location = data.Location ?? string.Empty,
+                    Address = data.Address,
+                    Buzzer = data.DisableBuzzer ? "Disable" : "Enable",
+                    Serial = null,
+                    Status = "Pending",
+                    IsSelected = true
+                });
+            }
+            var ledData = _excelService.LoadLedData(_projectContext.WorkingCopyPath);
+            Lights.Clear();
+            foreach (var data in ledData)
+            {
+                Lights.Add(new Led
+                {
+                    Index = data.RowIndex,
+                    Model = data.Model ?? string.Empty,
+                    Location = data.Location ?? string.Empty,
+                    Address = data.Address,
+                    TimeOut = data.Timeout,
+                    Status = "Pending",
+                    IsSelected = true
+                });
+            }
+            OnPropertyChanged(nameof(AreSensorsComplete));
+        }
+        // ---------- Run / Skip / Stop ----------
+        // ---------- Run / Skip / Stop ----------
         // ---------- Run / Skip / Stop ----------
         [RelayCommand]
         private async Task Start()
@@ -180,30 +206,49 @@ namespace InosentAnlageAufbauTool.ViewModels
                 MessageBox.Show("Bitte zuerst Anlage laden.");
                 return;
             }
-
+            if (string.IsNullOrWhiteSpace(_projectContext.WorkingCopyPath))
+            {
+                try
+                {
+                    _projectContext.WorkingCopyPath = _excelService.CreateWorkingCopy(_projectContext.ExcelPath);
+                    LoadFromWorkingCopy();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Arbeitskopie konnte nicht erstellt werden: {ex.Message}");
+                    Log($"Excel-Arbeitskopie-Fehler: {ex.Message}");
+                    return;
+                }
+            }
             // If not connected yet but ports exist, try auto-connect once more
             if (!_serialService.IsConnected && !string.IsNullOrWhiteSpace(SelectedPort))
                 ConnectToPort();
-
             if (!_serialService.IsConnected)
             {
                 MessageBox.Show("COM-Port nicht verbunden.");
                 return;
             }
-
             var selectedSensors = Sensors.Where(s => s.IsSelected).ToList();
             if (!selectedSensors.Any())
             {
                 MessageBox.Show("Keine Sensoren ausgewählt.");
                 return;
             }
-
+            var selectedLights = Lights.Where(l => l.IsSelected).ToList();
+            foreach (var s in selectedSensors)
+            {
+                s.Status = "Pending";
+                s.Serial = null;
+            }
+            foreach (var l in selectedLights)
+            {
+                l.Status = "Pending";
+            }
             _cts = new CancellationTokenSource();
             IsRunning = true;
-            StatusText = "Läuft …";
+            StatusText = "Sensoren...";
             StatusColor = "Yellow";
-
-            var progress = new Progress<SensorProgress>(p =>
+            var sensorProgress = new Progress<SensorProgress>(p =>
             {
                 Application.Current.Dispatcher.Invoke(() =>
                 {
@@ -216,66 +261,105 @@ namespace InosentAnlageAufbauTool.ViewModels
                     OnPropertyChanged(nameof(AreSensorsComplete));
                 });
             });
-
+            var ledProgress = new Progress<LedProgress>(p =>
+            {
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    if (p.Led != null)
+                    {
+                        p.Led.Status = p.Status;
+                    }
+                });
+            });
             try
             {
-                await _sensorWorkflow.RunAsync(
+                var sensorResults = await _sensorWorkflow.RunAsync(
                     selectedSensors,
-                    _projectContext.ExcelPath,
                     skipRequested: () =>
                     {
                         if (_skipEvent.WaitOne(0)) { _skipEvent.Reset(); return true; }
                         return false;
                     },
-                    progress: progress,
+                    progress: sensorProgress,
                     log: Log,
                     token: _cts.Token);
+                OnPropertyChanged(nameof(AreSensorsComplete));
+                if (!_cts.IsCancellationRequested && sensorResults.Count > 0)
+                {
+                    try
+                    {
+                        _excelService.WriteSerialsBatch(
+                            _projectContext.ExcelPath,
+                            sensorResults.Select(r => (r.ExcelRowIndex, r.Serial)).ToList());
+                        Log($"Excel-Update: {sensorResults.Count} Seriennummer(n) geschrieben.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Excel-Batch-Fehler: {ex.Message}");
+                    }
+                }
+                if (_cts.IsCancellationRequested)
+                    return;
+                StatusText = "Leuchten...";
+                StatusColor = "Yellow";
+                if (selectedLights.Any())
+                {
+                    await _ledWorkflow.ConfigureAsync(
+                        selectedLights,
+                        Log,
+                        ledProgress,
+                        _cts.Token);
+                }
+                else
+                {
+                    Log("Keine Leuchten ausgewählt.");
+                }
             }
-            catch (OperationCanceledException) { /* Stop pressed */ }
+            catch (OperationCanceledException)
+            {
+                // Stop pressed
+            }
             finally
             {
                 IsRunning = false;
-                StatusText = _cts.IsCancellationRequested ? "Abgebrochen" : "Fertig";
-                StatusColor = _cts.IsCancellationRequested ? "Red" : "LightGreen";
+                StatusText = _cts is { IsCancellationRequested: true } ? "Abgebrochen" : "Fertig";
+                StatusColor = _cts is { IsCancellationRequested: true } ? "Red" : "LightGreen";
                 _cts?.Dispose();
                 _cts = null;
             }
         }
-
         [RelayCommand]
         private void Skip() => _skipEvent.Set();
-
         [RelayCommand]
         private void Stop()
         {
             try { _cts?.Cancel(); } catch { }
         }
-
         // ---------- Printing ----------
         [RelayCommand]
         private void PrintLedLabels()
         {
-            if (string.IsNullOrEmpty(_projectContext.ExcelPath))
+            var addresses = Lights.Where(l => l.IsSelected).Select(l => l.Address).ToList();
+            if (addresses.Count == 0)
             {
-                MessageBox.Show("Bitte zuerst Anlage laden.");
+                MessageBox.Show("Keine Leuchten ausgew\u00e4hlt.");
                 return;
             }
-            var ok = _labelPrinterService.PrintLedLabels(_projectContext.ExcelPath);
-            Log(ok ? "LED-Labels gedruckt." : $"Fehler beim Drucken von LED-Labels. {_labelPrinterService}");
+            var ok = _labelPrinterService.PrintLedAddresses(addresses);
+            Log(ok ? $"LED-Labels gedruckt f\u00fcr {addresses.Count} Adressen." : "Fehler beim Drucken von LED-Labels.");
         }
-
         [RelayCommand]
         private void PrintSensorLabels()
         {
-            if (string.IsNullOrEmpty(_projectContext.ExcelPath))
+            var addresses = Sensors.Where(s => s.IsSelected).Select(s => s.Address).ToList();
+            if (addresses.Count == 0)
             {
-                MessageBox.Show("Bitte zuerst Anlage laden.");
+                MessageBox.Show("Keine Sensoren ausgew\u00e4hlt.");
                 return;
             }
-            var ok = _labelPrinterService.PrintSensorLabels(_projectContext.ExcelPath);
-            Log(ok ? "Sensor-Labels gedruckt." : $"Fehler beim Drucken von Sensor-Labels. {_labelPrinterService}");
+            var ok = _labelPrinterService.PrintSensorAddresses(addresses);
+            Log(ok ? $"Sensor-Labels gedruckt f\u00fcr {addresses.Count} Adressen." : "Fehler beim Drucken von Sensor-Labels.");
         }
-
         // ---------- Config ----------
         [RelayCommand]
         private void OpenConfig()
@@ -286,7 +370,6 @@ namespace InosentAnlageAufbauTool.ViewModels
                 {
                     Owner = Application.Current.MainWindow
                 };
-
                 if (wnd.ShowDialog() == true)
                 {
                     _labelPrinterService.ApplySettings(_configService.Load());
@@ -302,7 +385,6 @@ namespace InosentAnlageAufbauTool.ViewModels
                 StatusColor = "Red";
             }
         }
-
         // ---------- Help ----------
         [RelayCommand]
         private void ShowHelp()

@@ -1,6 +1,8 @@
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Windows.Data;
+using System.Windows.Media;
 
 namespace InosentAnlageAufbauTool.Converters
 {
@@ -16,14 +18,7 @@ namespace InosentAnlageAufbauTool.Converters
             throw new NotImplementedException();
         }
     }
-}
-using System;
-using System.Globalization;
-using System.Windows.Data;
-using System.Windows.Media;
 
-namespace InosentAnlageAufbauTool.Converters
-{
     public class BoolToBrushConverter : IValueConverter
     {
         public Brush TrueBrush { get; set; }
@@ -31,7 +26,7 @@ namespace InosentAnlageAufbauTool.Converters
 
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
-            return (value is bool boolean && boolean) ? TrueBrush : FalseBrush;
+            return (value is bool b && b) ? TrueBrush : FalseBrush;
         }
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
@@ -39,19 +34,12 @@ namespace InosentAnlageAufbauTool.Converters
             throw new NotImplementedException();
         }
     }
-}
-using System;
-using System.Globalization;
-using System.Linq;
-using System.Windows.Data;
 
-namespace InosentAnlageAufbauTool.Converters
-{
     public class MultiAndConverter : IMultiValueConverter
     {
         public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
         {
-            return values.All(value => value is bool boolean && boolean);
+            return values != null && values.All(v => v is bool b && b);
         }
 
         public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
@@ -59,13 +47,7 @@ namespace InosentAnlageAufbauTool.Converters
             throw new NotImplementedException();
         }
     }
-}
-using System;
-using System.Globalization;
-using System.Windows.Data;
 
-namespace InosentAnlageAufbauTool.Converters
-{
     public class WidthToBoolConverter : IValueConverter
     {
         public double Threshold { get; set; }
@@ -80,19 +62,12 @@ namespace InosentAnlageAufbauTool.Converters
             throw new NotImplementedException();
         }
     }
-}
-using System;
-using System.Globalization;
-using System.Linq;
-using System.Windows.Data;
 
-namespace InosentAnlageAufbauTool.Converters
-{
     public class MultiOrConverter : IMultiValueConverter
     {
         public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
         {
-            return values.Any(value => value is bool boolean && boolean);
+            return values != null && values.Any(v => v is bool b && b);
         }
 
         public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)

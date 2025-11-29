@@ -1,4 +1,5 @@
-﻿using System;
+﻿// File: Converters/MultiAndConverter.cs
+using System;
 using System.Globalization;
 using System.Windows.Data;
 
@@ -13,16 +14,31 @@ namespace InosentAnlageAufbauTool.Converters
 
         public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
         {
+            if (values == null)
+                return false;
+
             foreach (var v in values)
             {
-                if (v is bool b) { if (!b) return false; }
-                else if (v is string s) { if (string.IsNullOrWhiteSpace(s)) return false; }
-                else if (v == null) return false;
+                if (v is bool b)
+                {
+                    if (!b) return false;
+                }
+                else if (v is string s)
+                {
+                    if (string.IsNullOrWhiteSpace(s)) return false;
+                }
+                else if (v == null)
+                {
+                    return false;
+                }
             }
+
             return true;
         }
 
         public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture)
-            => throw new NotImplementedException();
+        {
+            throw new NotImplementedException();
+        }
     }
 }

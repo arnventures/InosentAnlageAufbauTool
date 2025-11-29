@@ -6,6 +6,9 @@ using System.Linq;
 
 namespace InosentAnlageAufbauTool.Services
 {
+    public record SensorSheetRow(int RowIndex, string Model, string? Location, int Address, bool DisableBuzzer);
+    public record LedSheetRow(int RowIndex, string? Model, string? Location, int Address, int Timeout);
+
     public class ExcelService
     {
         // EPPlus Lizenz einmalig setzen
@@ -19,13 +22,25 @@ namespace InosentAnlageAufbauTool.Services
             "LIGHTIMOK","LIGHT","LEDIMOK","LED","Led","Light","Light 24V"
         };
 
-        public List<(string Model, string? Location, int Address, bool DisableBuzzer)> LoadSensorData(string path)
+        public string CreateWorkingCopy(string sourcePath)
         {
-            var data = new List<(string, string?, int, bool)>();
+            if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+                throw new FileNotFoundException("Excel-Datei nicht gefunden.", sourcePath);
+
+            var tempName = $"Inosent_Work_{Path.GetFileNameWithoutExtension(sourcePath)}_{DateTime.Now:yyyyMMddHHmmssfff}{Path.GetExtension(sourcePath)}";
+            var dstPath = Path.Combine(Path.GetTempPath(), tempName);
+            File.Copy(sourcePath, dstPath, overwrite: true);
+            return dstPath;
+        }
+
+        public List<SensorSheetRow> LoadSensorData(string path)
+        {
+            var data = new List<SensorSheetRow>();
             using var package = new ExcelPackage(new FileInfo(path));
             var ws = package.Workbook.Worksheets["GAS"];
             if (ws?.Dimension == null) return data;
 
+            int logicalRow = 1; // aligns with Import sheet indexing
             for (int row = 2; row <= ws.Dimension.End.Row; row++)
             {
                 var model = ws.Cells[row, 1].Value?.ToString();
@@ -35,19 +50,20 @@ namespace InosentAnlageAufbauTool.Services
                 var disableBuzzer = string.Equals(ws.Cells[row, 4].Value?.ToString(), "Buzzer Disable", StringComparison.OrdinalIgnoreCase);
 
                 if (!string.IsNullOrWhiteSpace(model) && addr > 0)
-                    data.Add((model!, location, addr, disableBuzzer));
+                    data.Add(new SensorSheetRow(logicalRow++, model!, location, addr, disableBuzzer));
             }
             return data;
         }
 
         // LED-Daten aus Tabelle laden (B = Adresse, D = Timeout); nur Adressen > 185
-        public List<(int Address, int Timeout)> LoadLedData(string path)
+        public List<LedSheetRow> LoadLedData(string path)
         {
-            var result = new List<(int, int)>();
+            var result = new List<LedSheetRow>();
             using var package = new ExcelPackage(new FileInfo(path));
             var ws = package.Workbook.Worksheets.FirstOrDefault(s => s?.Name != null && LedSheets.Contains(s.Name.Trim()));
             if (ws?.Dimension == null) return result;
 
+            int logicalRow = 1;
             for (int row = 2; row <= ws.Dimension.End.Row; row++)
             {
                 if (int.TryParse(ws.Cells[row, 2].Value?.ToString(), out var addr) && addr > 185)
@@ -55,7 +71,9 @@ namespace InosentAnlageAufbauTool.Services
                     int timeout = 0;
                     int.TryParse(ws.Cells[row, 4].Value?.ToString(), out timeout);
                     timeout = (timeout == 180) ? 180 : 0;
-                    result.Add((addr, timeout));
+                    var model = ws.Cells[row, 1].Value?.ToString();
+                    var location = ws.Cells[row, 3].Value?.ToString();
+                    result.Add(new LedSheetRow(logicalRow++, model, location, addr, timeout));
                 }
             }
             return result;

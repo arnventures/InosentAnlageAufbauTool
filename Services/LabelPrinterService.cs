@@ -1,15 +1,24 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using OfficeOpenXml;
 using InosentAnlageAufbauTool.Helpers;
 using InosentAnlageAufbauTool.Models;
 
 namespace InosentAnlageAufbauTool.Services
 {
+    /// <summary>
+    /// Prints labels by writing the target address into a small Excel file that GoLabel reads.
+    /// </summary>
     public class LabelPrinterService
     {
         private readonly ExcelService _excelService;
         private readonly ILogger _logger;
+
+        private const string SheetName = "Tabelle1";
+        private readonly string _sensorExcelPath = Path.Combine(Path.GetTempPath(), "PowerAutomateGodexSensorDe.xlsx");
+        private readonly string _ledExcelPath = Path.Combine(Path.GetTempPath(), "PowerAutomateGodexLightDe.xlsx");
 
         // Live settings (editable via Config)
         public string SensorPrinterIp { get; private set; } = "";
@@ -17,7 +26,7 @@ namespace InosentAnlageAufbauTool.Services
         public string SensorTemplatePath { get; private set; } = "";
         public string LedTemplatePath { get; private set; } = "";
         public string GoLabelExePath { get; private set; } = @"C:\Program Files (x86)\GoDEX\GoLabel II\GoLabel.exe";
-        public int CopiesEach { get; private set; } = 2; // fixed at 2 as requested
+        public int CopiesEach { get; private set; } = 2; // fixed at 2
 
         public LabelPrinterService(ExcelService excelService, ConfigService configService, ILogger logger)
         {
@@ -40,32 +49,76 @@ namespace InosentAnlageAufbauTool.Services
             CopiesEach = cfg.CopiesEach < 1 ? 2 : cfg.CopiesEach;
         }
 
-        public bool PrintLedLabels(string srcPath)
-        {
-            // Prepare Excel export (unchanged logic – ensure data is present)
-            var dstPath = Path.Combine(Path.GetTempPath(), "PowerAutomateGodexLightDe.xlsx");
-            if (!_excelService.CopyLedData(srcPath, dstPath))
-            {
-                _logger.Log("[Print] LED: Excel konnte nicht erstellt/kopiert werden.");
-                return false;
-            }
-
-            return RunGoLabel(LedTemplatePath, LedPrinterIp, "LED");
-        }
-
         public bool PrintSensorLabels(string srcPath)
         {
-            var dstPath = Path.Combine(Path.GetTempPath(), "PowerAutomateGodexSensorDe.xlsx");
-            if (!_excelService.CopySensorData(srcPath, dstPath))
+            // Keep compatibility: prepare Excel from source, then print one label per row/address.
+            var okCopy = _excelService.CopySensorData(srcPath, _sensorExcelPath);
+            if (!okCopy)
             {
                 _logger.Log("[Print] SENSOR: Excel konnte nicht erstellt/kopiert werden.");
                 return false;
             }
 
-            return RunGoLabel(SensorTemplatePath, SensorPrinterIp, "SENSOR");
+            return RunGoLabel(SensorTemplatePath, SensorPrinterIp, "SENSOR", _sensorExcelPath);
         }
 
-        private bool RunGoLabel(string template, string ip, string tag)
+        public bool PrintLedLabels(string srcPath)
+        {
+            var okCopy = _excelService.CopyLedData(srcPath, _ledExcelPath);
+            if (!okCopy)
+            {
+                _logger.Log("[Print] LED: Excel konnte nicht erstellt/kopiert werden.");
+                return false;
+            }
+
+            return RunGoLabel(LedTemplatePath, LedPrinterIp, "LED", _ledExcelPath);
+        }
+
+        public bool PrintSensorAddresses(IEnumerable<int> addresses)
+        {
+            return PrintAddressesInternal(addresses, SensorTemplatePath, SensorPrinterIp, _sensorExcelPath, "SENSOR");
+        }
+
+        public bool PrintLedAddresses(IEnumerable<int> addresses)
+        {
+            return PrintAddressesInternal(addresses, LedTemplatePath, LedPrinterIp, _ledExcelPath, "LED");
+        }
+
+        private bool PrintAddressesInternal(IEnumerable<int> addresses, string template, string ip, string excelPath, string tag)
+        {
+            var any = false;
+            var allOk = true;
+            foreach (var addrInt in addresses)
+            {
+                any = true;
+                byte addr = (byte)addrInt;
+                try
+                {
+                    WriteAddressExcel(excelPath, addr);
+                    RunGoLabel(template, ip, tag, excelPath);
+                    _logger.Log($"[Print] {tag} Adresse {addr}: OK");
+                }
+                catch (Exception ex)
+                {
+                    allOk = false;
+                    _logger.Log($"[Print] {tag} Adresse {addr}: {ex.Message}");
+                }
+            }
+            if (!any) _logger.Log($"[Print] {tag}: keine Adressen ausgewählt.");
+            return any && allOk;
+        }
+
+        private void WriteAddressExcel(string path, byte address)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Path.GetTempPath());
+            using var package = new ExcelPackage(new FileInfo(path));
+            var ws = package.Workbook.Worksheets[SheetName] ?? package.Workbook.Worksheets.Add(SheetName);
+            ws.Cells.Clear();
+            ws.Cells[1, 1].Value = address;
+            package.Save();
+        }
+
+        private bool RunGoLabel(string template, string ip, string tag, string excelPath)
         {
             try
             {
@@ -78,6 +131,9 @@ namespace InosentAnlageAufbauTool.Services
                 if (!File.Exists(template))
                     throw new FileNotFoundException($"{tag}: Template nicht gefunden.", template);
 
+                if (!File.Exists(excelPath))
+                    throw new FileNotFoundException($"{tag}: Excel nicht gefunden.", excelPath);
+
                 var args = string.Join(" ", new[]
                 {
                     "-f", Quote(template),
@@ -89,7 +145,7 @@ namespace InosentAnlageAufbauTool.Services
                 {
                     FileName = GoLabelExePath,
                     Arguments = args,
-                    UseShellExecute = true,      // allow GoLabel UI if needed
+                    UseShellExecute = true,
                     CreateNoWindow = false
                 };
 
@@ -97,7 +153,6 @@ namespace InosentAnlageAufbauTool.Services
                 p.WaitForExit(10_000);
                 if (p.ExitCode != 0)
                     throw new Exception($"{tag}: GoLabel ExitCode {p.ExitCode}.");
-                _logger.Log($"[Print] {tag}: OK → {ip}");
                 return true;
             }
             catch (Exception ex)

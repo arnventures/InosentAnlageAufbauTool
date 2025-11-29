@@ -1,67 +1,81 @@
-﻿using System;
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using InosentAnlageAufbauTool.Helpers;
-using InosentAnlageAufbauTool.Services;
+using InosentAnlageAufbauTool.Models;
 
 namespace InosentAnlageAufbauTool.Services.Workflows
 {
     public sealed class LedWorkflow : ILedWorkflow
     {
         private readonly SerialService _serial;
-        private readonly ExcelService _excel;
         private readonly ILogger? _logger;
 
-        public LedWorkflow(SerialService serial, ExcelService excel, ILogger? logger = null)
+        private const int VerifyTimeoutMs = 1600;
+        private const int PollDelayMs = 80;
+        private const int PresenceTimeoutMs = 160;
+
+        public LedWorkflow(SerialService serial, ILogger? logger = null)
         {
             _serial = serial;
-            _excel = excel;
             _logger = logger;
         }
 
-        public async Task ConfigureFromExcelAsync(string excelPath, Action<string> log, CancellationToken token)
+        public async Task ConfigureAsync(
+            System.Collections.Generic.IList<Led> lights,
+            Action<string> log,
+            IProgress<LedProgress> progress,
+            CancellationToken token)
         {
-            var leds = _excel.LoadLedData(excelPath);
-            if (leds.Count == 0)
-            {
-                log("Keine LEDs zu programmieren (LIGHTIMOK leer oder keine Adressen > 185).");
-                return;
-            }
-
-            foreach (var (address, timeout) in leds)
+            foreach (var led in lights)
             {
                 token.ThrowIfCancellationRequested();
+                progress.Report(new LedProgress(led, "Active", null));
+
                 try
                 {
                     _serial.FlushBuffers();
 
                     // FC16: write registers 4..7: [Notbetrieb=0, Addr, Baud=9600, Key=0x8F8F]
-                    ushort[] block = { 0, (ushort)address, 9600, 0x8F8F };
+                    ushort[] block = { 0, (ushort)led.Address, 9600, 0x8F8F };
                     _serial.WriteMultiple(1, 4, block);
-                    log($"LED @1: FC16 [4..7]=[0,{address},9600,0x8F8F]");
+                    log($"LED @1: Adresse -> {led.Address}, Baud 9600");
 
-                    // Timeout at reg 3 (0 or 180)
-                    await _serial.WriteSingleAsync(3, (ushort)timeout, 1);
-                    log($"LED Timeout gesetzt (Reg3={timeout}).");
+                    await _serial.WriteSingleAsync(3, (ushort)led.TimeOut, 1);
+                    log($"LED Timeout gesetzt (Reg3={led.TimeOut}).");
 
-                    // Confirm alive (be lenient; LEDs don't reboot)
-                    var t0 = DateTime.UtcNow;
-                    bool ok = false;
-                    while (!token.IsCancellationRequested && (DateTime.UtcNow - t0).TotalMilliseconds < 3000)
-                    {
-                        if (_serial.CheckFast((byte)address, 200, token)) { ok = true; break; }
-                        try { await Task.Delay(150, token); } catch { }
-                    }
-                    if (!ok) log($"LED @ {address}: keine stabile Antwort – vermutlich ok.");
-                    else log($"LED @ {address}: bestätigt.");
+                    bool ok = await ConfirmAsync((byte)led.Address, token);
+                    progress.Report(new LedProgress(led, ok ? "OK" : "Fail", null));
+                    log(ok ? $"LED @ {led.Address}: best�tigt." : $"LED @ {led.Address}: keine stabile Antwort.");
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
-                    log($"LED {address}: Fehler: {ex.Message}");
+                    progress.Report(new LedProgress(led, "Fail", ex.Message));
+                    log($"LED {led.Address}: Fehler: {ex.Message}");
+                    _logger?.Log($"[LED] {ex.Message}");
                 }
             }
+        }
+
+        private async Task<bool> ConfirmAsync(byte address, CancellationToken token)
+        {
+            var start = DateTime.UtcNow;
+            while ((DateTime.UtcNow - start).TotalMilliseconds < VerifyTimeoutMs)
+            {
+                token.ThrowIfCancellationRequested();
+                try
+                {
+                    if (_serial.CheckFast(address, PresenceTimeoutMs, token))
+                        return true;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch { /* retry */ }
+
+                try { await Task.Delay(PollDelayMs, token); } catch (OperationCanceledException) { throw; }
+            }
+            return false;
         }
     }
 }
