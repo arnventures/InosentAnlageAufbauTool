@@ -9,7 +9,7 @@ using InosentAnlageAufbauTool.Models;
 namespace InosentAnlageAufbauTool.Services
 {
     /// <summary>
-    /// Prints labels by writing the target address into a small Excel file that GoLabel reads.
+    /// Prints labels by writing the selected items into a small Excel file that GoLabel reads.
     /// </summary>
     public class LabelPrinterService
     {
@@ -49,9 +49,9 @@ namespace InosentAnlageAufbauTool.Services
             CopiesEach = cfg.CopiesEach < 1 ? 2 : cfg.CopiesEach;
         }
 
+        // Legacy: print from full Excel copies (kept for compatibility)
         public bool PrintSensorLabels(string srcPath)
         {
-            // Keep compatibility: prepare Excel from source, then print one label per row/address.
             var okCopy = _excelService.CopySensorData(srcPath, _sensorExcelPath);
             if (!okCopy)
             {
@@ -74,47 +74,120 @@ namespace InosentAnlageAufbauTool.Services
             return RunGoLabel(LedTemplatePath, LedPrinterIp, "LED", _ledExcelPath);
         }
 
+        // New: print directly from selected in-memory models (preserves address/type/location/timeout)
+        public bool PrintSensorAddresses(IEnumerable<Sensor> sensors)
+            => PrintSensorsInternal(sensors, SensorTemplatePath, SensorPrinterIp, _sensorExcelPath, "SENSOR");
+
+        public bool PrintLedAddresses(IEnumerable<Led> leds)
+            => PrintLedsInternal(leds, LedTemplatePath, LedPrinterIp, _ledExcelPath, "LED");
+
+        // Backward compatibility: accept plain address lists (fills minimal data)
         public bool PrintSensorAddresses(IEnumerable<int> addresses)
         {
-            return PrintAddressesInternal(addresses, SensorTemplatePath, SensorPrinterIp, _sensorExcelPath, "SENSOR");
+            var list = new List<Sensor>();
+            foreach (var addr in addresses) list.Add(new Sensor { Address = addr });
+            return PrintSensorAddresses(list);
         }
 
         public bool PrintLedAddresses(IEnumerable<int> addresses)
         {
-            return PrintAddressesInternal(addresses, LedTemplatePath, LedPrinterIp, _ledExcelPath, "LED");
+            var list = new List<Led>();
+            foreach (var addr in addresses) list.Add(new Led { Address = addr });
+            return PrintLedAddresses(list);
         }
 
-        private bool PrintAddressesInternal(IEnumerable<int> addresses, string template, string ip, string excelPath, string tag)
+        private bool PrintSensorsInternal(IEnumerable<Sensor> sensors, string template, string ip, string excelPath, string tag)
         {
-            var any = false;
-            var allOk = true;
-            foreach (var addrInt in addresses)
+            var list = new List<Sensor>(sensors ?? Array.Empty<Sensor>());
+            if (list.Count == 0)
             {
-                any = true;
-                byte addr = (byte)addrInt;
-                try
-                {
-                    WriteAddressExcel(excelPath, addr);
-                    RunGoLabel(template, ip, tag, excelPath);
-                    _logger.Log($"[Print] {tag} Adresse {addr}: OK");
-                }
-                catch (Exception ex)
-                {
-                    allOk = false;
-                    _logger.Log($"[Print] {tag} Adresse {addr}: {ex.Message}");
-                }
+                _logger.Log($"[Print] {tag}: keine Adressen ausgewaehlt.");
+                return false;
             }
-            if (!any) _logger.Log($"[Print] {tag}: keine Adressen ausgewählt.");
-            return any && allOk;
+
+            try
+            {
+                WriteSensorsExcel(excelPath, list);
+                return RunGoLabel(template, ip, tag, excelPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.Log($"[Print] {tag}: {ex.Message}");
+                return false;
+            }
         }
 
-        private void WriteAddressExcel(string path, byte address)
+        private bool PrintLedsInternal(IEnumerable<Led> leds, string template, string ip, string excelPath, string tag)
+        {
+            var list = new List<Led>(leds ?? Array.Empty<Led>());
+            if (list.Count == 0)
+            {
+                _logger.Log($"[Print] {tag}: keine Adressen ausgewaehlt.");
+                return false;
+            }
+
+            try
+            {
+                WriteLedsExcel(excelPath, list);
+                return RunGoLabel(template, ip, tag, excelPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.Log($"[Print] {tag}: {ex.Message}");
+                return false;
+            }
+        }
+
+        private void WriteSensorsExcel(string path, List<Sensor> sensors)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Path.GetTempPath());
             using var package = new ExcelPackage(new FileInfo(path));
             var ws = package.Workbook.Worksheets[SheetName] ?? package.Workbook.Worksheets.Add(SheetName);
             ws.Cells.Clear();
-            ws.Cells[1, 1].Value = address;
+
+            // Header (aligns with GAS sheet structure)
+            ws.Cells[1, 1].Value = "Model";
+            ws.Cells[1, 2].Value = "Address";
+            ws.Cells[1, 3].Value = "Location";
+            ws.Cells[1, 4].Value = "Buzzer";
+
+            int row = 2;
+            foreach (var s in sensors)
+            {
+                ws.Cells[row, 1].Value = s.Model ?? string.Empty;
+                ws.Cells[row, 2].Value = s.Address;
+                ws.Cells[row, 3].Value = s.Location ?? string.Empty;
+                ws.Cells[row, 4].Value = string.Equals(s.Buzzer, "Disable", StringComparison.OrdinalIgnoreCase)
+                    ? "Buzzer Disable"
+                    : "Buzzer Enable";
+                row++;
+            }
+
+            package.Save();
+        }
+
+        private void WriteLedsExcel(string path, List<Led> leds)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Path.GetTempPath());
+            using var package = new ExcelPackage(new FileInfo(path));
+            var ws = package.Workbook.Worksheets[SheetName] ?? package.Workbook.Worksheets.Add(SheetName);
+            ws.Cells.Clear();
+
+            ws.Cells[1, 1].Value = "Model";
+            ws.Cells[1, 2].Value = "Address";
+            ws.Cells[1, 3].Value = "Location";
+            ws.Cells[1, 4].Value = "Timeout";
+
+            int row = 2;
+            foreach (var led in leds)
+            {
+                ws.Cells[row, 1].Value = led.Model ?? string.Empty;
+                ws.Cells[row, 2].Value = led.Address;
+                ws.Cells[row, 3].Value = led.Location ?? string.Empty;
+                ws.Cells[row, 4].Value = led.TimeOut;
+                row++;
+            }
+
             package.Save();
         }
 

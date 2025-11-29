@@ -488,7 +488,12 @@
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Top" Text="Protokoll" FontWeight="SemiBold" Padding="12,8"/>
                     <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="12,0,12,12">
-                        <TextBlock Text="{Binding LogText, Mode=OneWay}" TextWrapping="Wrap"/>
+                        <TextBox Text="{Binding LogText, Mode=OneWay}"
+                                 TextWrapping="Wrap"
+                                 AcceptsReturn="True"
+                                 IsReadOnly="True"
+                                 BorderThickness="0"
+                                 Background="Transparent"/>
                     </ScrollViewer>
                 </DockPanel>
             </Border>

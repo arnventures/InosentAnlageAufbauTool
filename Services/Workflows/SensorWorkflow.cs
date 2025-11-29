@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using InosentAnlageAufbauTool.Helpers;
@@ -13,11 +14,29 @@ namespace InosentAnlageAufbauTool.Services.Workflows
         private readonly SerialService _serial;
         private readonly ILogger? _logger;
 
-        // Tuned timings (tight for speed, still tolerant)
-        private const int PollFastMs = 50;
-        private const int PollDelayMs = 50;
-        private const int RebootWaitMs = 600;
-        private const int VerifyTimeoutMs = 1400;
+        // Tuned timings for quicker but stable loops
+        private const int PollIntervalMs = 60;
+        private const int StableWindowMs = 180;
+        private const int PresenceTimeoutMs = 140;
+        private const int SerialReadTimeoutMs = 170;
+        private const int SerialReadAttempts = 6;
+        private const int SerialReadAttemptsAfterMove = 8;
+        private const int AddressHandoverGapMs = 110;
+        private const int RebootWaitMs = 450;
+        private const int WaitGoneTimeoutMs = 1800;
+        private const int WaitAliveTimeoutMs = 1400;
+
+        private const ushort BuzzerRegister = 255;
+        private const ushort BuzzerBit = 1 << 9;
+
+        private enum WaitOutcome
+        {
+            Ready,
+            Skip,
+            Cancel
+        }
+
+        private sealed record SensorOutcome(bool Success, int? Serial, string? Note);
 
         public SensorWorkflow(SerialService serial, ILogger? logger = null)
         {
@@ -36,176 +55,278 @@ namespace InosentAnlageAufbauTool.Services.Workflows
 
             foreach (var sensor in sensors)
             {
-                token.ThrowIfCancellationRequested();
+                if (token.IsCancellationRequested) break;
+
+                if (!sensor.IsSelected)
+                {
+                    progress.Report(new SensorProgress(sensor, "Skipped", sensor.Serial, "nicht ausgewaehlt"));
+                    log($"Sensor {sensor.Index} uebersprungen (nicht ausgewaehlt).");
+                    continue;
+                }
 
                 progress.Report(new SensorProgress(sensor, "Active", sensor.Serial, null));
+                log($"Sensor {sensor.Index}: warte auf Geraet @1 ... (Skip ueberspringt; Stop beendet)");
 
-                log($"Warte auf Geraet @1 fuer Sensor {sensor.Index} ... (Skip ueberspringt; Stop beendet)");
-
-                var ready = await WaitForAddr1Async(skipRequested, token);
-                if (!ready)
+                var waitOutcome = await WaitForAddr1Async(skipRequested, token);
+                if (waitOutcome == WaitOutcome.Cancel) break;
+                if (waitOutcome == WaitOutcome.Skip)
                 {
-                    if (token.IsCancellationRequested) throw new OperationCanceledException(token);
                     progress.Report(new SensorProgress(sensor, "Skipped", sensor.Serial, "vom Benutzer uebersprungen"));
                     log($"Sensor {sensor.Index} uebersprungen.");
                     continue;
                 }
 
-                var (success, serial) = await ConfigureSingleAsync(sensor, log, token);
-                if (success && serial.HasValue && serial.Value > 0)
+                SensorOutcome outcome;
+                try
                 {
-                    batchSerials.Add(new SensorRunResult(sensor.ExcelRow, serial.Value));
-                    sensor.Serial = serial.Value;
+                    outcome = await ConfigureSingleAsync(sensor, log, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    progress.Report(new SensorProgress(sensor, "Fail", sensor.Serial, "Abgebrochen"));
+                    break;
+                }
+                if (outcome.Serial.HasValue && outcome.Serial.Value > 0)
+                {
+                    batchSerials.Add(new SensorRunResult(sensor.ExcelRow, outcome.Serial.Value));
+                    sensor.Serial = outcome.Serial.Value;
                 }
 
-                var newStatus = success ? "OK" : "Fail";
-                progress.Report(new SensorProgress(sensor, newStatus, serial, null));
-                log(success
-                    ? $"Sensor {sensor.Index} OK (SN={serial?.ToString() ?? "-"})"
-                    : $"Sensor {sensor.Index} Fail.");
+                var status = outcome.Success ? "OK" : "Fail";
+                progress.Report(new SensorProgress(sensor, status, outcome.Serial, outcome.Note));
+                log(outcome.Success
+                    ? $"Sensor {sensor.Index} OK (Adr {sensor.Address}, SN={outcome.Serial?.ToString() ?? "-"})"
+                    : $"Sensor {sensor.Index} Fail: {outcome.Note ?? "Unbekannter Fehler"}");
             }
 
             return batchSerials;
         }
 
-        private async Task<bool> WaitForAddr1Async(Func<bool> skipRequested, CancellationToken token)
+        private async Task<WaitOutcome> WaitForAddr1Async(Func<bool> skipRequested, CancellationToken token)
         {
+            int stableMs = 0;
             while (true)
             {
-                token.ThrowIfCancellationRequested();
-                if (skipRequested()) return false;
+                if (token.IsCancellationRequested) return WaitOutcome.Cancel;
+                if (skipRequested()) return WaitOutcome.Skip;
 
-                try
+                _serial.FlushBuffers();
+
+                bool alive = ProbeAlive(1, token, PresenceTimeoutMs);
+                if (!alive)
                 {
-                    if (_serial.CheckFast(1, PollFastMs, token))
-                        return true;
+                    alive = ProbeByType(1, token);
                 }
-                catch (OperationCanceledException) { throw; }
-                catch { /* transient */ }
 
-                try { await Task.Delay(PollDelayMs, token); } catch (OperationCanceledException) { throw; }
+                if (alive)
+                {
+                    stableMs += PollIntervalMs;
+                    if (stableMs >= StableWindowMs) return WaitOutcome.Ready;
+                }
+                else
+                {
+                    stableMs = 0;
+                }
+
+                try { await Task.Delay(PollIntervalMs, token); }
+                catch (OperationCanceledException) { return WaitOutcome.Cancel; }
             }
         }
 
-        private async Task<(bool Success, int? Serial)> ConfigureSingleAsync(
+        private bool ProbeAlive(byte unit, CancellationToken token, int timeoutMs)
+        {
+            try { return _serial.CheckFast(unit, timeoutMs, token); }
+            catch (OperationCanceledException) { throw; }
+            catch { return false; }
+        }
+
+        private bool ProbeByType(byte unit, CancellationToken token)
+        {
+            try
+            {
+                var dt = _serial.ReadRegisterFast(unit, SerialService.REG_DEVICE_TYPE, PresenceTimeoutMs, token);
+                return dt > 0;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { return false; }
+        }
+
+        private async Task<SensorOutcome> ConfigureSingleAsync(
             Sensor sensor,
             Action<string> log,
             CancellationToken token)
         {
-            token.ThrowIfCancellationRequested();
+            bool success = false;
+            string? note = null;
+            int? serial = null;
 
             try
             {
                 _serial.FlushBuffers();
 
-                // 1) Quick serial read on addr 1
-                int serial = TryReadSerialQuick(1, attempts: 6, timeoutMs: PollFastMs + 40, token);
+                var sn = await ReadSerialRobustAsync(1, SerialReadAttempts, SerialReadTimeoutMs, token);
+                if (sn > 0) serial = sn;
 
-                // 2) Optional buzzer disable before address change
-                if (string.Equals(sensor.Buzzer, "Disable", StringComparison.OrdinalIgnoreCase))
+                await EnsureBuzzerAsync(sensor.Buzzer, log, token);
+
+                var targetAddr = (byte)sensor.Address;
+                if (IsAlive(targetAddr, token))
                 {
-                    try
-                    {
-                        ushort current = _serial.ReadRegisterFast(1, 255, PollFastMs, token);
-                        ushort mask = (ushort)(1 << 9);
-                        ushort newVal = (ushort)(current & ~mask);
-                        if (newVal != current)
-                        {
-                            await _serial.WriteSingleAsync(255, newVal, 1);
-                            log("Buzzer disabled (bit9 cleared).");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        log($"Buzzer disable Hinweis: {ex.Message}");
-                    }
+                    note = $"Adresse {targetAddr} ist bereits belegt.";
+                    return new SensorOutcome(false, serial, note);
                 }
 
-                // 3) Program address 1 -> new
-                byte newAdr = (byte)sensor.Address;
-                _serial.SetAddress(1, newAdr, token);
-                log($"Adresse programmiert: 1 -> {newAdr}");
+                await RtuGapAsync(token);
 
-                // 4) Soft reboot to lock in address
+                _serial.SetAddress(1, targetAddr, token);
+                log($"Adresse programmiert: 1 -> {targetAddr}");
+
+                await RtuGapAsync(token);
                 _serial.SoftRestart(1, token);
                 await Task.Delay(RebootWaitMs, token);
 
-                // 5) Verify alive @ new address (lenient)
-                bool moved = await ConfirmOnAddressAsync(newAdr, token);
-                if (!moved)
+                var gone = await WaitGoneAsync(1, WaitGoneTimeoutMs, token);
+                if (!gone) note = "Addr 1 antwortet weiter (Handover).";
+
+                await RtuGapAsync(token);
+
+                var alive = await WaitAliveStableAsync(targetAddr, WaitAliveTimeoutMs, token);
+                if (!alive)
                 {
-                    log("Hinweis: Ger�t antwortet nicht stabil unter neuer Adresse - fahre fort.");
+                    note = note ?? "Neue Adresse antwortet nicht stabil.";
+                    return new SensorOutcome(false, serial, note);
                 }
 
-                // 6) Fallback serial read @ new address if needed
-                if (serial <= 0)
+                if (!serial.HasValue || serial.Value <= 0)
                 {
-                    serial = TryReadSerialQuick(newAdr, attempts: 5, timeoutMs: 300, token);
+                    sn = await ReadSerialRobustAsync(targetAddr, SerialReadAttemptsAfterMove, 260, token);
+                    if (sn > 0) serial = sn;
                 }
 
-                if (serial <= 0)
-                    log("Seriennummer nicht lesbar.");
-                else
-                    log($"Seriennummer = {serial}");
-
-                return (true, serial > 0 ? serial : (int?)null);
+                if (serial == null) note = "Seriennummer nicht lesbar.";
+                success = true;
             }
             catch (OperationCanceledException)
             {
-                log("Abgebrochen.");
                 throw;
             }
             catch (Exception ex)
             {
-                log($"Config-Fehler: {ex.Message}");
-                _logger?.Log($"[SensorWorkflow] Fehler: {ex.Message}");
-                return (false, null);
+                note = ex.Message;
+                _logger?.Log($"[SensorWorkflow] Fehler {sensor.Address}: {ex.Message}");
+                success = false;
+            }
+
+            return new SensorOutcome(success, serial, note);
+        }
+
+        private async Task EnsureBuzzerAsync(string? buzzerMode, Action<string> log, CancellationToken token)
+        {
+            if (string.IsNullOrWhiteSpace(buzzerMode)) return;
+
+            bool disable = string.Equals(buzzerMode, "Disable", StringComparison.OrdinalIgnoreCase);
+            bool enable = string.Equals(buzzerMode, "Enable", StringComparison.OrdinalIgnoreCase);
+
+            if (!disable && !enable) return;
+
+            try
+            {
+                ushort current = _serial.ReadRegisterFast(1, BuzzerRegister, PresenceTimeoutMs, token);
+                bool currentlyDisabled = (current & BuzzerBit) == 0;
+                ushort desired = disable ? (ushort)(current & ~BuzzerBit) : (ushort)(current | BuzzerBit);
+
+                if (desired != current)
+                {
+                    await _serial.WriteSingleAsync(BuzzerRegister, desired, 1);
+                    log(disable ? "Buzzer disabled (bit9 cleared)." : "Buzzer enabled (bit9 set).");
+                }
+                else
+                {
+                    log(disable == currentlyDisabled ? "Buzzer bereits korrekt." : "Buzzer unveraendert.");
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                log($"Buzzer Hinweis: {ex.Message}");
             }
         }
 
-        private async Task<bool> ConfirmOnAddressAsync(byte address, CancellationToken token)
+        private async Task<bool> WaitGoneAsync(byte address, int timeoutMs, CancellationToken token)
         {
-            var start = DateTime.UtcNow;
-            while ((DateTime.UtcNow - start).TotalMilliseconds < VerifyTimeoutMs)
+            var sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < timeoutMs)
             {
-                token.ThrowIfCancellationRequested();
-                try
-                {
-                    if (_serial.CheckFast(address, PollFastMs, token))
-                        return true;
-                }
-                catch (OperationCanceledException) { throw; }
-                catch { /* transient */ }
+                if (!IsAlive(address, token))
+                    return true;
 
-                try { await Task.Delay(PollDelayMs, token); } catch (OperationCanceledException) { throw; }
+                try { await Task.Delay(PollIntervalMs, token); }
+                catch (OperationCanceledException) { return false; }
             }
             return false;
         }
 
-        private int TryReadSerialQuick(byte unit, int attempts, int timeoutMs, CancellationToken token)
+        private async Task<bool> WaitAliveStableAsync(byte address, int timeoutMs, CancellationToken token)
         {
-            int serial = 0;
-            for (int i = 0; i < attempts && serial <= 0; i++)
+            var sw = Stopwatch.StartNew();
+            int stableMs = 0;
+
+            while (sw.ElapsedMilliseconds < timeoutMs)
+            {
+                if (IsAlive(address, token))
+                {
+                    stableMs += PollIntervalMs;
+                    if (stableMs >= StableWindowMs) return true;
+                }
+                else
+                {
+                    stableMs = 0;
+                }
+
+                try { await Task.Delay(PollIntervalMs, token); }
+                catch (OperationCanceledException) { return false; }
+            }
+            return false;
+        }
+
+        private bool IsAlive(byte address, CancellationToken token)
+        {
+            try { return _serial.CheckFast(address, PresenceTimeoutMs, token); }
+            catch (OperationCanceledException) { throw; }
+            catch { /* retry with type read */ }
+
+            try
+            {
+                var dt = _serial.ReadRegisterFast(address, SerialService.REG_DEVICE_TYPE, PresenceTimeoutMs, token);
+                return dt > 0;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { return false; }
+        }
+
+        private async Task<int> ReadSerialRobustAsync(byte address, int attempts, int timeoutMs, CancellationToken token)
+        {
+            for (int i = 0; i < attempts; i++)
             {
                 token.ThrowIfCancellationRequested();
                 try
                 {
-                    serial = _serial.ReadSerialFast(unit, timeoutMs, token);
+                    int serial = _serial.ReadSerialFast(address, timeoutMs, token);
+                    if (serial > 0) return serial;
                 }
-                catch
-                {
-                    serial = 0;
-                }
+                catch (OperationCanceledException) { throw; }
+                catch { /* retry */ }
 
-                if (serial > 0) break;
                 if (i < attempts - 1)
                 {
-                    try { Task.Delay(PollDelayMs, token).GetAwaiter().GetResult(); }
+                    try { await Task.Delay(PollIntervalMs, token); }
                     catch (OperationCanceledException) { throw; }
                 }
             }
-            return serial;
+            return 0;
         }
 
+        private static Task RtuGapAsync(CancellationToken token)
+            => Task.Delay(AddressHandoverGapMs, token);
     }
 }
